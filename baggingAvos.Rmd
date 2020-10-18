@@ -1,0 +1,257 @@
+---
+title: "MATH218 HW3"
+author: "Walter Conrad and Henry Mound"
+date: "4/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Intro 
+
+Describe
+
+First, we read in our data. We will start with an avocado data set.
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+
+setwd("~/Desktop/StatsLearning/HW3")
+avocado <- read_csv("avocado.csv")
+my.data <- avocado
+
+# Clean the data
+my.data.clean <- my.data %>%
+  na.omit()
+```
+
+
+We need to write a function that performs a bagging of simple linear models. What is the big picture? Our bagging function will sample from the data used to create the linear model a number of times, as specified by the user calling the 'myBag' function. myBag will create a number of individual linear models with each sample, and then average the results to produce the final bagged model.
+
+``` {r}
+myBag <- function(predictor, response, nBaggs) {
+  inBagIndexes <- list()
+  sampledModels <- data.frame(slope = numeric(),
+                              yint = numeric())
+  for(i in 1:nBaggs) {
+    indexes <- sample(1:nrow(my.data.clean),
+                      size = nrow(my.data.clean),
+                      replace = TRUE)
+    inBagIndexes[[i]] <- c(indexes)
+    trainingData <- my.data.clean[indexes, ]
+    
+    mean.x <- mean(trainingData[[predictor]])
+    mean.y <- mean(trainingData[[response]])
+    
+    x <- trainingData %>% select(predictor)
+    y <- trainingData %>% select(response)
+    
+    totalSumSquares <- sum((y - mean.y)^2)
+    
+    slope <- sum((x - mean.x) * (y - mean.y)) / sum((x-mean.x)^2)
+    yint <- mean.y - slope*mean.x
+    
+    sampledModels[i, ] <- c(slope, yint)
+  }
+  
+  print(sampledModels)
+  #Average the bags
+  
+  slope.final <- mean(sampledModels$slope)
+  yint.final <- mean(sampledModels$yint)
+  
+  #Calculate OOB error
+  resids <- data.frame(residual = double())
+  for(i in 1:nrow(my.data.clean)){
+    
+    predictions <- data.frame(prediction = double())
+    for(j in 1:nBaggs){
+      
+      if(!(i %in% inBagIndexes[[j]])){
+        predict <- my.data.clean[[i, predictor]] * sampledModels[j, c("slope")] + sampledModels[j, c("yint")]
+        predictions <- rbind(predictions, predict)
+      }
+    }
+    
+    mean_prediction <- mean(predictions[,1])
+    resid <- mean_prediction - my.data.clean[[i, response]]
+    resids[i,] <- c(resid)
+  }
+  
+  residualSumSquares = sum(((resids$residual)^2), na.rm = TRUE)
+
+  rSquared = 1 - (residualSumSquares/totalSumSquares)
+  
+  rmse = sqrt((sum((resids$residual)^2, na.rm = TRUE))/nrow(my.data.clean))
+  
+  print(paste0("RSS: ", residualSumSquares))
+  print(paste0("TSS: ", totalSumSquares))
+  print(paste0("R^2: ", rSquared))
+  print(paste0("RMSE: ", rmse))
+  
+  return(rSquared)
+}
+```
+
+
+Now, we call the myBag function. We will predict AveragePrice as a funtion of Total Volume. We'll try it with a couple different values for number of bags to see how the resulting models compare. Our output shows a slope and y-intercept created by each of the bagged models, along with an error output displaying the Residual Sum of Squares, Total Sum of Squares, R^2, and Mean Root Sum of Squares metrics. (apologies, for some reason the table and metrics are printing twice; it seems that the code is running twice)
+```{r}
+rSquaredAvocados1 <- myBag("Total Volume", "AveragePrice", 10)
+rSquaredAvocados1
+```
+
+For comparison, we use the lm() function to predict the same thing - AveragePrice as a function of Total Volume:
+
+```{r}
+lm.avocados1 <- lm(AveragePrice ~ `Total Volume`,
+                   data = my.data.clean)
+summary(lm.avocados1)
+```
+
+Notice that the models produce the roughly the same error metrics. R calls the root mean squared error the "Residual standard error" and the lm() function found a rse of 0.1588. Our bagged model calculated an rmse of 0.3934 using out-of-bag predictions; evidently our model did a slightly worse at predicting the actual AveragePrice values as our residuals were, on average and normalized by the size of the input, a bit larger. The lm() function reported a 0.04175 r^2 value; our model reported an r^2 of .04814. This tells us that Total Volume of avocadoes sold only explains around 4% of the variation in the AveragePrice, so it's not a very good predictor in this case.
+
+
+```{r}
+rSquaredAvocados2 <- myBag("Total Volume", "AveragePrice", 6)
+rSquaredAvocados2
+```
+
+```{r}
+lm.avocados1 <- lm(AveragePrice ~ `Total Volume`,
+                   data = my.data.clean)
+summary(lm.avocados1)
+```
+
+Using 6 bags instead of 10, our model reported an rmse of 0.1519 and an r^2 of 0.1873. The rmse roughly matches the rse from the lm() function. Notice, however, that the r^2 value for the model with 6 bags is significantly "better" than lm()'s reported r^2 value. It's quite unlikely that by reducing the number of bags, Total Volume somehow explained more of the variation in the data. Rather, perhaps the way that the bagging was implemented allowed Total Volume to explain more of the variation in a different (probably smaller) subset of the data. As a general trend, we found that including more bags made our myBag function perform more comparably to the lm() function, and using fewer bags inflated the reported value for r^2.
+
+Again, note that the error metrics computed above were determined using an out-of-bag approach; that is, the residuals were calculated by an ensemble of bag models that did not originally see the observation they were predicting on. This is intended to give us, as the researchers, a better sense of how the model can perform in the future on different data.
+
+Now, we will call the myBag function using the diamonds data set. We will predict price as a function of carats. 
+```{r}
+my.data <- diamonds # Change the data set being used. 
+my.data.clean <- my.data %>%
+  na.omit() %>%
+  head(10000)
+rootMeanSquaredDiamonds <- myBag("carat", "price", 10)
+rootMeanSquaredDiamonds
+```
+
+Again for comparison:
+
+```{r}
+lm.diamonds1 <- lm(price ~ carat,
+                   data = my.data.clean)
+summary(lm.diamonds1)
+```
+
+Our model's rmse was actually significantly less than the lm() function's: ours was 553.6 as opposed to 1549 for lm(). That means that our model reportedly did a better job predicting the actual values. Our r^2, however, was 0.7451 as opposed to 0.8493, meaning our model reported that carat only predicted about %74.5 of the variation in diamond price, whereas the lm() model reported that almost %85 percent of the variation in price could be explained by the carat. Again, this must have something to do with the sampling introduced by the bagging. And because the predictions were made by an oob ensemble of models, it makes sense that when viewing "new" data, our model explains slightly less of the variation compared to an lm() function which is looking at just one data set.
+
+For comparison, we try a 70-30 test-train split to see if the error metrics vary in this case. This might make our bagged model perform in a more similar way to the lm() function.
+
+```{r}
+# Take 70% of the data for training
+smp_size <- floor(0.7 * nrow(my.data.clean))
+
+set.seed(123)
+train.indices <- sample(seq_len(nrow(my.data.clean)), size = smp_size)
+
+# Get train and test sets
+train <- my.data.clean[train.indices, ]
+test <- my.data.clean[-train.indices, ]
+
+
+myBag2 <- function(predictor, response, nBaggs) {
+  
+  inBagIndexes <- list()
+  
+  sampledModels <- data.frame(slope = numeric(),
+                              yint = numeric())
+  
+  for(i in 1:nBaggs) {
+    
+    indexes <- sample(1:nrow(train),
+                      size = nrow(train),
+                      replace = TRUE)
+    
+    inBagIndexes[[i]] <- c(indexes)
+    #print(inBagIndexes[[i]])
+    
+    trainingData <- my.data.clean[indexes, ]
+    
+    #manual linear model
+    mean.x <- mean(trainingData[[predictor]])
+    mean.y <- mean(trainingData[[response]])
+    
+    x <- trainingData %>% select(predictor)
+    y <- trainingData %>% select(response)
+    
+    totalSumSquares <- sum((y - mean.y)^2)
+    
+    slope <- sum((x - mean.x) * (y - mean.y)) / sum((x-mean.x)^2)
+    yint <- mean.y - slope*mean.x
+    
+    sampledModels[i, ] <- c(slope, yint)
+  }
+  
+  print(sampledModels)
+  #Average the bags
+  
+  slope.final <- mean(sampledModels$slope)
+  yint.final <- mean(sampledModels$yint)
+  
+  
+  resids <- data.frame(residual = double())
+  for(i in 1:nrow(test)){
+    
+    pred <- test[[i,predictor]]*slope.final + yint.final
+    resid <- pred - test[[i,response]]
+    
+    resids[i,] <- c(resid)
+  }
+  
+  
+  #Make prediction
+  residualSumSquares = sum(((resids$residual)^2), na.rm = TRUE)
+  
+  
+  rSquared = 1 - (residualSumSquares/totalSumSquares)
+  
+  
+  rmse = sqrt((sum((resids$residual)^2, na.rm = TRUE))/nrow(train))
+  
+  print(paste0("RSS: ", residualSumSquares))
+  print(paste0("TSS: ", totalSumSquares))
+  print(paste0("rSquared: ", rSquared))
+  print(paste0("RMSE: ", rmse))
+  
+  
+  return(rmse)
+}
+```
+
+We call the new "myBag2" function.
+
+```{r}
+rootMeanSquaredDiamonds2 <- myBag2("carat", "price", 10)
+rootMeanSquaredDiamonds
+```
+
+For comparison:
+
+```{r}
+lm.diamonds2 <- lm(price ~ carat,
+                   data = my.data.clean)
+summary(lm.diamonds2)
+```
+
+This time our model reportedly outperformed lm() for both metrics, reporting an rmse of approximately 375 as opposed to 556 and an r^2 of .851 compared to 0.7491. I hesitate to give too much wait to these results, especially given that the r^2 values differ so significantly. However, it does make sense that the bagged linear model performs better when seeing "new" data (in this case the test data) because it is the average of a number of different models; however, it seems to inflate the r^2 value indicating that more of the variation can be explained as a function of the predictor.
+
+Overall, the our bagging function and the lm() function performed quite similarly. For general trends, it seemed that using more bags influenced our bagged model to act more like the lm(). Additionally, one result of the bagging seemed to be that bagging had a tendency to inflate the r^2 value, probably due to some effect of the sampling that is not immediately clear.
+
+
+
+
+
+

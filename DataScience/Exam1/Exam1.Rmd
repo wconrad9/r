@@ -1,0 +1,243 @@
+---
+title: "Conrad_Test1"
+author: "Walter Conrad"
+date: "10/16/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+```{r}
+library(rvest)
+library(tidytext)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(textdata)
+library(gridExtra)
+library(data.table)
+library(stringr)
+```
+
+Question 1:
+
+I created data frames containing the necessary information about salary and position.
+
+```{r}
+years <- c(2012, 2013, 2014, 2015, 2016)
+consultant.salaries <- data.frame(years,
+                                  Salary = c(22000,
+                                             35000,
+                                             37000,
+                                             46500,
+                                             63000),
+                                  Occupation = c("Consultant",
+                                                 "Consultant",
+                                                 "Consultant",
+                                                 "Consultant",
+                                                 "Consultant"))
+Assistant.salaries <- data.frame(years,
+                                Salary = c(22000,
+                                          24000,
+                                           23500,
+                                           23000,
+                                           26500),
+                                Occupation = c("Research Assistant",
+                                               "Research Assistant",
+                                               "Research Assistant",
+                                               "Research Assistant",
+                                               "Research Assistant"))
+Instructor.salaries <- data.frame(years,
+                                 Salary = c(22000,
+                                            29500,
+                                            32000,
+                                            31750,
+                                            34500),
+                                 Occupation = c("Instructor",
+                                                "Instructor",
+                                                "Instructor",
+                                                "Instructor",
+                                                "Instructor"))
+```
+
+I merged my data frames together so that I could display them all in a single graph.
+```{r}
+merge1 <- full_join(consultant.salaries,
+                    Instructor.salaries,
+                    by = c("years",
+                           'Occupation',
+                           'Salary'))
+merge2 <- full_join(merge1,
+                    Assistant.salaries,
+                    by = c("years",
+                           'Occupation',
+                           'Salary'))
+```
+
+I created a graph containing the data from my merged table. I used an online hex picker to match the color of the graph exactly.
+
+```{r}
+merge2 %>%
+  group_by(years) %>%
+  ggplot(aes(x = as.numeric(years),
+             y = Salary,
+             fill = Occupation)) +
+  geom_area(position = 'identity') +
+  xlab("Year") +
+  ylab("Income($)") +
+  scale_fill_manual(values = c("#51b3eb",
+                               "#f1e62a",
+                               "#ce3b0c")) +
+  ggtitle("Alex's Income in Various Jobs") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  theme(legend.position="bottom", legend.title = element_blank()) +
+  theme(plot.title = element_text(hjust=.5)) +
+  theme(text = element_text(size = 10))
+```
+
+
+Question 2:
+
+```{r}
+reddit.data <- fread("~/Desktop/RedditUsersFull(4).csv")
+```
+
+First I created a subset of the data with 1000 usernames so that I could test my method before running on the large overall dataset. I was able to successfully isolate the standalone two-digit numbers (note that if a string contained more than 1 pair of standalone numbers, my code selects the first instance as the standalone number used to represent that username).
+
+```{r}
+test1000 <- reddit.data %>%
+  head(1000)
+
+test1000 %>%
+  mutate(digits = ifelse(str_detect(test1000$author, "(?<![:digit:])[:digit:]{2}(?![:digit:])"),
+                         str_extract(test1000$author, "(?<![:digit:])[:digit:]{2}(?![:digit:])"),
+                          0)) %>%
+  filter(digits > 10 & digits <= 99) %>%
+  group_by(digits) %>%
+  summarize(count = n()) %>%
+  ggplot(aes(x = digits,
+             y = count)) +
+  geom_bar(stat = 'identity') +
+  coord_flip()
+```
+
+Once I had my test subset working, I applied the same code to the entire data set to create the distribution.
+
+```{r}
+reddit.data %>%
+  mutate(standalone.digits = ifelse(str_detect(reddit.data$author, "(?<![:digit:])[:digit:]{2}(?![:digit:])"),
+                         str_extract(reddit.data$author, "(?<![:digit:])[:digit:]{2}(?![:digit:])"),
+                         0)) %>%
+  filter(standalone.digits > 10 & standalone.digits <= 99) %>%
+  group_by(standalone.digits) %>%
+  summarize(count = n()) %>%
+  ggplot(aes(x = standalone.digits,
+             y = count)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  theme(text = element_text(size = 8)) +
+  ggtitle("Age Distribution of Reddit Users as Indicated by Standalone Two-Digit Numbers")
+```
+
+
+Above is the graph of distribution of standalone numbers (11-99) found in reddit usernames. Assuming that users include two-digit standalone numbers to reference their birth year, the graph shows a distribution with some interesting trends. For 99-70, standlone numbers that could represent the years 1999-1970, the count of users decreases fairly steadily moving from 99 until 70. This indicates that there are more reddit users at age 20 than age 49, and the number of users of a certain age generally decreases as age of user increases from 20 to 49. There are a few spikes, namely at 99, 88, and 77, perhaps because these double numbers are attractive standalone numbers to put in a username regardless of whether they are indicative of the user's birth year. Someone born in 1970 is 49 years old, and between 70 and 35 the distribution is fairly even with spikes at some significant or meaningful numbers. The count for standalones between 70 and 35 is likely lower because there are fewer reddit users between the age of 49 and 84, the corresponding ages. The distribution between 34 - 11 is surprising high, equal if not higher by count than the distribution between 99 and 77. Many of these values, namely 34 - 16 which correspond to ages 85 - 103, likely do not represent birth years in all cases as these would be very old reddit users. If these standalones do represent birth years then there are a lot of reddit users between the ages of 86-103, and in this range as age increases from 86, the number of users at that age increases as well. I find it perhaps more likely that these values in the 10s, 20s, and 30s might represent one's age rather than their birth year. The distribution 15 - 11 could actually represent birth years in the 2000s, namely 2015-2011 corresponding to ages 4-8. These counts are some of the highest in the graph as a whole: 12, possibly representing 2012 and an age of 7, is the highest peak in the graph, potentially indicating that 12 is the most common age of reddit users.
+
+Overall, the graph indicates that most common age of reddit users is 12, and the number of reddit users at a certain age generally decreases as age increases until about age 49. After that point, the number of reddit users of ages 50-85 is fairly even. Our data indicates that there are a suprisingly high number of reddit users of ages between 85-103, and that the number of reddit users of a certain age increases as age increases in the range 85-103. Another explanation is that standalones in the 10s,20s, and 30s represent ages for users rather than birth years. There are also spikes of standalone numbers that are two of the same digit (ie 99, 88, 77, etc) along with certain standalone numbers that have taken on significance beyond simply representing a birth year...
+
+
+Question 3:
+
+First I loaded in and formatted my marriage data from the wiki url.
+
+```{r}
+marriage.url <- 'https://en.wikipedia.org/wiki/Marriage_age_in_the_United_States'
+
+marriage.data <- marriage.url %>%
+  read_html() %>%             #reads the websites html code
+  html_nodes("table") %>%     #scrapes all table nodes from url
+  .[[1]] %>%
+  html_table(fill = TRUE)
+
+colnames(marriage.data) <- marriage.data[1,]
+
+marriage.data.copy <- marriage.data
+
+marriage.data.formatted <- marriage.data.copy[-1,]
+```
+
+Next I formatted and simplified the census data to find state populations for calculating proportion of total US population.
+
+```{r}
+census.data <- fread(file = "~/Desktop/CensusData2010.csv")
+census.data2 <- census.data
+census.data3 <- census.data
+
+census.data2$POPULATION <- as.numeric(census.data$POPULATION)
+
+census.simplified1 <- census.data3 %>%
+  group_by(STATE) %>%
+  filter(NAME == STATE)
+
+census.simplified <- census.simplified1[-9,]
+```
+
+I made some adjustments to my formatted marriage data. Some were necessary, others probably weren't. All in all, I wanted to format this table so that it could be merged with my census data by the name of the state. Then I would have a table containing the population of the state and the minimum age of marriage after all exceptions in the same row. Using this data, I could group by minium marriage age and then sum the populations of the corresponding states. Dividing this sum by the total population of the US gives me the proportion of the population living under that minimum age law.
+
+```{r}
+marriage.final <- marriage.data.formatted %>%
+  mutate(test = ifelse(str_detect(marriage.data.formatted$`Minimum statutory age after all exceptions[6]`, "(?<![:punct:])[:digit:]{2}(?![:digit:])"),
+                       str_extract(marriage.data.formatted$`Minimum statutory age after all exceptions[6]`, "(?<![:digit:])[:digit:]{2}(?![:digit:])"),
+                       "none")) %>%
+  mutate(proportion = ifelse(test != 0,
+                             ((as.numeric(test) - 14)/10 * (22213952 + 21137826) + 31255995 + 29919938)/309300000,
+                             "Technically, everyone.")) %>%
+  mutate(categorize = as.numeric(test) - 14) %>%
+  mutate(NAMES1 = ifelse(str_detect(marriage.data.formatted$Name, "[:punct:]"),
+                        str_sub(marriage.data.formatted$Name, 0, -5),
+                        Name))
+```
+
+```{r}
+marriage.final2 <- marriage.final %>%  
+mutate(NAMES2 = ifelse(str_detect(marriage.final$NAMES1, "[:punct:]"),
+                         str_sub(marriage.final$NAMES1, 0, -5),
+                         NAMES1))
+```
+
+
+Below I create my merged table that contains all of the information I need in order to calculate the proportion under each minimum age category. I followed the process that I outlined above.
+
+```{r}
+merged <- left_join(census.simplified,
+          marriage.final2,
+          by = c("NAME" = "NAMES2"))
+```
+
+Below I calculate the total population of the US. I divided the sum of population under each minimum age category by this factor to determine the proportion of the population living under that minimum age category.
+
+```{r}
+#US POP 2010: 308,745,538
+merged %>%
+  ungroup() %>%
+  summarize(US.pop = sum(as.numeric(POPULATION)))
+```
+
+As I described above, I grouped the data by the minimum age category (I called this variable test in my merged table), and summed the population of all states belonging to that category. Then I divided this sum by the population of the US and summarized this result for all the categories.
+
+```{r}
+merged %>%
+  mutate(minimum.age.after.all.exceptions = ifelse(STATE == "District of Columbia",
+                      "none",
+                      test)) %>%
+  group_by(minimum.age.after.all.exceptions) %>%
+  summarize(Proportion.of.US.Population = sum(as.numeric(POPULATION))/308745538)
+```
+
+Note that "none" is also a large category - this means that there was no minimum age after all exceptions listed on the wikipedia. In states with this law, minors of any age can get married but seemed to need the permission of some combination of their guardians and a court of law, along with other stipulations that varied from state to state.
+
+

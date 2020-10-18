@@ -1,0 +1,409 @@
+---
+title: "test1"
+author: "Walter Conrad"
+date: "4/20/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warnings = FALSE,
+                      messages = FALSE)
+```
+
+My task was to create a custom random forest function that only included tree "stumps" - that is, each of the "trees" in my forest can only have a single split, and therefore instead of a tree, each element of my forest is more aptly a stump. Otherwise, the random forest of stumps is similar to a normal random forest implementation. I use the random forest of stumps to vote on a classification based upon a number of predictor variables, and I use the average vote to classify a given observation.
+
+First I load the libraries I will need to complete this task:
+
+
+```{r}
+library(tidyverse)
+library(rpart)
+library(rattle)
+library(fmsb)
+library(caret)
+library(ggplot2)
+```
+
+
+Then I load some data that I can use to train and test my model. I chose to work with the titanic data set.
+
+
+```{r}
+titanic <- read_csv('titanic.csv')
+```
+
+
+I 'clean' and reorganize my data so that the response variable is in the leftmost column, and the set of possible predictor variables that I would like to use are in columns to the right of the response variable. In this format, I can pass the data table into the rpart function in order to create individual stumps. In general, it is expected that a user of my function would input their data in this way - column 1 contains the response variable, and columns 2-n contain predictors. I chose to omit some variables that had undesirable effects when creating trees; for example, using passenger names as a predictor results in a terribly biased tree with very high variance. Using passenger names to predict survival on the titanic is fairly nonsensical.
+
+
+```{r}
+titanic$Survived <- factor(titanic$Survived)
+titanic.pruned <- subset(titanic, select = -c(PassengerId,Name, Ticket,Cabin))
+```
+
+
+Next I created a test-training split with my 'pruned' data set in order to train my stumps and then test their performance.
+
+
+```{r}
+indexes <- sample(nrow(titanic.pruned),
+                  size = nrow(titanic.pruned)*.7)
+
+titanic.pruned.train <- titanic.pruned[indexes, ]
+titanic.pruned.test <- titanic.pruned[-indexes, ]
+```
+
+
+With setup complete, I can write my function. The function takes two arguments, nStumps and nVar. nStumps tells the function how many stumps to create, and nVar tells the function how many randomly selected predictor variables to show each stump when making a split.
+
+
+```{r}
+myStumps <- function(nStumps, nVar) {
+  
+  #store stumps
+  forest <- list(nStumps)
+  
+  #store predictions for each stump to enable averaged voting
+  preds <- list(nStumps)
+  
+  #store variable importance for each stump
+  stumps.var.imp <- list(nStumps)
+  
+  for(i in 1:nStumps){
+    
+    #sample a subset of the predictor variables, as specified by nVar parameter
+    vars <- sample(2:ncol(titanic.pruned.train),
+                  size = nVar,
+                  replace = FALSE)
+    
+    #prepare the stump data frame
+    titanic.stump <- subset(titanic.pruned.train, select = c(Survived, vars))
+    
+    #create the stump and store in the forest
+    forest[[i]] <- rpart(titanic.stump,
+                        na.action = na.omit,
+                        minsplit = 0,
+                        minbucket = 0,
+                        cp = .0001,
+                        maxdepth = 1)
+    
+    #if the stump isn't NULL
+    if(nrow(forest[[i]]$frame) == 3) {
+      preds[[i]] <- ifelse(predict(forest[[i]], titanic.pruned.test)[,2]>.5,1,0)
+      stumps.var.imp[[i]] <- data.frame(forest[[i]]$variable.importance)
+    }
+  }
+  
+  
+  final.preds <- NULL
+  
+  #loop through each element in the test set and predict
+  #survival as an average of all the stumps' votes
+  for(i in 1:nrow(titanic.pruned.test)){
+    
+    final.pred <- 0
+    nvotes <- 0
+    
+    for(j in 1:length(preds)){
+      
+      
+    if(!(is.null(preds[[j]]))) {
+
+      current_pred <- data.frame(preds[[j]])
+      
+        if(current_pred[i,] <= 1) {
+          final.pred = final.pred + current_pred[i,]
+          nvotes = nvotes + 1
+        }
+      
+      }
+      
+    }
+    
+    final.pred = final.pred / nvotes
+    
+    final.preds[i] <- ifelse(final.pred >.5, 1,
+                             ifelse(final.pred == .5, round(runif(1,0,1)), 0))
+  }
+  
+  #Variable Importance
+  var.imp <- list(ncol(titanic.pruned.train)-1)
+  
+  #iterate through each possible predictor
+  k = 1
+  for(i in colnames(titanic.pruned.train[,-1])){
+  
+    var.imp[[k]] <- data.frame(predictor = i,
+                               imp = 0)
+    
+    #iterate through each stump
+    for(j in 1:length(stumps.var.imp)) {
+          
+          if( !(is.null(stumps.var.imp[[j]][i,])) && !(is.na(stumps.var.imp[[j]][i,])) ) {
+            
+            var.imp[[k]][ ,2] = var.imp[[k]][ , 2] + stumps.var.imp[[j]][i,]
+    
+        }
+    }
+    
+    k = k + 1
+  }
+  
+  
+  #merge all importance matrices
+  overall <- data.frame(predictor = NULL,
+                        imp = NULL)
+  for(i in 1:length(var.imp)){
+    overall <- rbind(overall, var.imp[[i]])
+  }
+  
+  overall <- data.frame(overall)
+  
+  #actual survival values
+  true_vals <- titanic.pruned.test$Survived
+  
+  #calculate accuracy
+  accuracy <- mean(final.preds == true_vals)
+  
+  #create confusion matrix
+  stumps_performance <- table(final.preds, true_vals)
+  
+  print(paste0("Kappa: ", Kappa.test(stumps_performance)))
+  print(paste0("accuracy: ", accuracy))
+  
+  return(overall)
+}
+```
+
+
+There are a few other things to note about my function. First of all, you can see that I had to include a conditional 'if(nrow(forest[[i]]$frame) == 3)' after creating each stump and before adding that stump to my forest. This was necessary because some of the stumps were not given enough information to make a split, and as a result they simply contained a root node. This root node was unable to make a prediction, so it should not be included in the random forest of stumps. I adjusted the control paramters of the rpart function to try to make a split as likely as possible.
+
+My function returns a few metrics to describe its performance. Using a confusion matrix, I report a Kappa value for the random forest. Additionally, I calculate and report the accuracy of classification. The function returns a data frame called 'overall' that reflects the overall variable importance of predictors in this forest. By piping the function into ggplot, I can create a variable importance graph for my random forest that is the aggregate importance of each variable across all of the stumps in the forest. I display a few examples of this functionality below.
+
+
+```{r}
+myStumps(3,4) %>%
+  ggplot(aes(x = predictor,
+             y = imp,
+             fill = predictor)) +
+  geom_bar(stat = 'identity') +
+  xlab('Predictor') +
+  ylab('Importance') +
+  ggtitle('Random Stump Forest Variable Importance') +
+  theme_light()
+```
+
+```{r}
+myStumps(10,4) %>%
+  ggplot(aes(x = predictor,
+             y = imp,
+             fill = predictor)) +
+  geom_bar(stat = 'identity') +
+  xlab('Predictor') +
+  ylab('Importance') +
+  ggtitle('Random Stump Forest Variable Importance') +
+  theme_light()
+```
+
+```{r}
+myStumps(25,4) %>%
+  ggplot(aes(x = predictor,
+             y = imp,
+             fill = predictor)) +
+  geom_bar(stat = 'identity') +
+  xlab('Predictor') +
+  ylab('Importance') +
+  ggtitle('Random Stump Forest Variable Importance') +
+  theme_light()
+```
+
+
+Finally it's time to compare the performance of my algorithm against a random forest package. Creating a graphic to compare the models was a bit of a lengthy process. I'd be interested to learn an easier way! I ran the "ranger" method for implementing a random forest with a tuneGrid paramter containing different values for mtry. I ran the model 3 times for 3 different values for number of trees in the forest: 10, 25, and 100.
+
+
+```{r}
+tune.grid <- expand.grid(mtry = 3:5,
+                         splitrule = 'gini',
+                         min.node.size = 1)
+
+rf_model1 <- train(Survived ~ .,
+                   data = titanic.pruned.train,
+                   num.trees = 100,
+                   na.action = na.omit,
+                   tuneGrid = tune.grid,
+                   method = "ranger")
+
+compare1 <- rf_model1$results[,-c(2,3,6,7)]
+
+compare1 <- compare1 %>%
+  mutate(trees = 100)
+
+
+rf_model2 <- train(Survived ~ .,
+                   data = titanic.pruned.train,
+                   num.trees = 10,
+                   na.action = na.omit,
+                   tuneGrid = tune.grid,
+                   method = "ranger")
+
+compare2 <- rf_model2$results[,-c(2,3,6,7)]
+
+compare2 <- compare2 %>%
+  mutate(trees = 10)
+
+rf_model3 <- train(Survived ~ .,
+                   data = titanic.pruned.train,
+                   num.trees = 25,
+                   na.action = na.omit,
+                   tuneGrid = tune.grid,
+                   method = "ranger")
+
+
+compare3 <- rf_model3$results[,-c(2,3,6,7)]
+
+compare3 <- compare1 %>%
+  mutate(trees = 25)
+```
+
+
+Then I combined these results in one table for the ranger method.
+
+
+```{r}
+compare.ranger <- rbind(compare1,compare2, compare3)
+
+compare.ranger <- compare.ranger %>%
+  mutate(method = 'ranger')
+```
+
+
+Next, I ran my function, myStumps, with each combination of these tuning parameters in order to allow for comparisons. I collected the data and then created a data frame with all of the information.
+
+
+```{r}
+stump.compare1 <- data.frame(mtry = 3,
+                            Accuracy = .7687,
+                            Kappa = .4622,
+                            trees = 10)
+
+stump.compare2 <- data.frame(mtry = 3,
+                             Accuracy = .7799,
+                             Kappa = .5156,
+                             trees = 25)
+
+stump.compare3 <- data.frame(mtry = 3,
+                             Accuracy = .75,
+                             Kappa = .4422,
+                             trees = 100)
+
+stump.compare4 <- data.frame(mtry = 4,
+                             Accuracy = .7463,
+                             Kappa = .4456,
+                             trees = 10)
+
+stump.compare5 <- data.frame(mtry = 4,
+                             Accuracy = .7799,
+                             Kappa = .5156,
+                             trees = 25)
+
+stump.compare6 <- data.frame(mtry = 4,
+                             Accuracy = .75,
+                             Kappa = .4422,
+                             trees = 100)
+
+stump.compare7 <- data.frame(mtry = 5,
+                             Accuracy = .7463,
+                             Kappa = .5156,
+                             trees = 10)
+
+stump.compare8 <- data.frame(mtry = 5,
+                             Accuracy = .7799,
+                             Kappa = .5156,
+                             trees = 25)
+
+stump.compare9 <- data.frame(mtry = 5,
+                             Accuracy = .7799,
+                             Kappa = .5156,
+                             trees = 100)
+
+stumps.compare <- rbind(stump.compare1,
+                        stump.compare2,
+                        stump.compare3,
+                        stump.compare4,
+                        stump.compare5,
+                        stump.compare6,
+                        stump.compare7,
+                        stump.compare8,
+                        stump.compare9)
+
+stumps.compare <- stumps.compare %>%
+  mutate(method = 'myStumps')
+```
+
+
+Finally, I combined the two data frames to make a data frame for overall comparison. By utilizing faceting, I was able to see the trends that emerged as a result of the tuning.
+
+
+```{r}
+overall.compare <- rbind(stumps.compare, compare.ranger)
+
+overall.compare %>%
+  ggplot(aes(x = trees,
+             y = Accuracy,
+             fill = method)) +
+  geom_bar(stat = 'identity',
+           position = 'dodge') +
+  facet_grid(rows = vars(trees), cols = vars(mtry)) +
+  coord_cartesian(ylim = c(.7,.84)) +
+  scale_x_discrete() +
+  xlab('Number of Trees, split by mtry') +
+  ylab('Accuracy') +
+  ggtitle('Accuracy over mtry and number of trees') +
+  theme_light()
+```
+
+
+From this graph, we can see that by the metric of accuracy, ranger outperforms myStumps in every case but one. In general, it makes sense that ranger has a greater accuracy because there is no limitation on the number of splits in a given tree. Therefore, the ranger model can segment the data in a greater number of ways, leading to more precise predictions. However, it is notable that myStumps performed comparably to the ranger method despite only being able to split once; after all, the accuracy metrics for the different models are consistently within .05 of each other, or less! This goes against what one might expect. One explanation could be that the titatic data has only a small number of important predictor variables. For example, by looking at the variable importance plots above, it is evident that 'Sex', 'Fare', and 'Pclass' are significantly more important in the stump forest compared to the other predictors, which are relatively insignificant. In a random forest of stumps, these important predictors are bound to be included, and averaging across the forest can result in a model that is almost as accurate as a method that can split on a greater number of unimportant predictors.
+
+This hypothesis is further supported by the lack of overall trend in the results for the myStump method. For ranger, in general, a smaller number of available variables for predicting (low mtry) and a higher number of trees in the forest resulted in a better accuracy for the model. For myStumps, when mtry = 3, 4, or 5 and nStumps = 25, and when mtry = 5 and nStumps = 100, the accuracy was 0.7799 and cohen's kappa was 0.5156. Despite these different tuning parameters, the performance of the function was the same. This indicates to me that once the forest is large enough and enough variables are considered, myStumps has an upper limit to how well it can perform because it can only predict so well with one split and the given predictors.
+
+
+```{r}
+
+overall.compare %>%
+  ggplot(aes(x = trees,
+             y = Kappa,
+             fill = method)) +
+  geom_bar(stat = 'identity',
+           position = 'dodge') +
+  facet_grid(rows = vars(trees), cols = vars(mtry)) +
+  coord_cartesian(ylim = c(.4,.65)) +
+  scale_x_discrete() +
+  xlab('Number of Trees, split by mtry') +
+  ylab('Kappa') +
+  ggtitle('Kappa over mtry and number of trees') +
+  theme_light()
+```
+
+
+The kappa value for myStumps was consistently lower than that for ranger. This means that the successful classifications using myStumps were a bit more the result of random chance compared to the ranger random forest. Again, this makes intuitive sense, because the random forest of stumps is much more simple than the ranger forest.
+
+One trend that emerges is that for ranger, as mtry increases, the kappa metric decreases - it is possible that because there are only 7 predictors, using 5 out of the 7 for each split results in a forest of correlated trees that cannot predict as well as an uncorrelated forest.
+
+The opposite is the case for myStumps - as mtry increases, the kappa value increases. This could be due to the fact that if each stump is shown 5 out of the 7 total predictors, then the important variables are likely to be in that subset. If each stump has the important predictors, then the resulting forest will perform a better classification.
+
+Conclusively, my myStumps function that created a random forest of stumps performed surprisingly well in comparison to the ranger random forest method. It seems that if the data set included a larger number of predictors, and especially a larger number of important predictors, then the difference in performance may have been more pronounced because of myStumps' split limitation. My results support the idea that a large forest of uncorrelated, individually poor trees can outperform a large number of correlated, good trees.
+
+
+
+
+
+
+
+
+
+
+
+
+

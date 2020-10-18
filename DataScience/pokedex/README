@@ -1,0 +1,3 @@
+Created a shiny app that can search for pokemon and scrape images and information
+from the internet - I've created my own pokedex! One can also see where these
+pokemon are located on an interactive geojson leaflet map.

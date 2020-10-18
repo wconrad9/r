@@ -1,0 +1,263 @@
+---
+title: "wconrad-HW1"
+author: "Walter Conrad"
+date: "2/24/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(gridExtra)
+library(class)
+library(stringr)
+library(matlab)
+
+cars <- read_csv('OLX_Car_Data_CSV.csv')
+```
+
+
+
+
+I decided to work with a dataset from Kaggle called "Pakistan Used Cars":
+https://www.kaggle.com/karimali/used-cars-data-pakistan.
+
+I ended up trying to predict the brand of a car based upon 1) its price 
+and 2) the number of kilometers that the car had driven. I was surprisingly 
+successful! Although my knn models were a bit lacking... more on that 
+later.
+
+1) First and foremost, I had to use knn to predict the value of my 
+categorical variable of interest, namely the brand of the car based upon 
+price and kilometers driven.
+
+```{r}
+#clean out na rows
+cars.clean <- cars %>%
+  na.omit()
+
+#create my training set; used >50% of the data;
+#selected only columns Price and KMs Driven
+train <- cars.clean[, c(4,6)] %>%
+  head(12500)
+
+#create my testing set
+test <- cars.clean[-c(1:12500), c(4,6)]
+
+#create true classification labels;
+#these are the corresponding correct values for the train set
+pred_labels <- cars.clean[c(1:12500), 1]
+
+
+#run knn to create my model! I used the square root of n for
+#a k-value in this case as I found this was a good rule of thumb.
+pred_model <- knn(train, test, pred_labels$Brand, k = 112)
+
+#Next I selected the actual, correct Brand values for my test set;
+#I compare these to the predictions my knn function made.
+test.actuals <- cars.clean[-c(1:12500), 1]
+
+#organize my data
+prop.set <- data.frame(predictions = pred_model,
+                       actuals = test.actuals$Brand)
+
+#calculating the proportion of correct classifications
+prop.correct <- mean(as.character(prop.set$predictions) == as.character(prop.set$actuals))
+```
+
+By using KNN with a k-value of 112, I found that I could predict the brand of the car correctly about 57% of the time. Pretty good!
+
+2) Now that I have my model working in theory, I had to test different values of k in order to ensure that I choose an optimal value of k for my final graphics. In order to do so, I use Leave-One-Out Cross Validation (LOOCV).
+
+```{r}
+#Creating a sample of my data to make LOOCV more time-realistic
+cars.clean.sample <- cars.clean[sample(nrow(cars.clean), 1000), ]
+
+#initialize empty arrays to store generated values
+LOOCV.prop <- NULL
+pred <- NULL
+
+for(k in 1:112) {
+  
+  for(i in 1:nrow(cars.clean.sample)){
+    #remove ith row and use for testing
+    current.test <- cars.clean.sample[i, c(4,6)]
+    
+    #use remaining data for training
+    current.train <- cars.clean.sample[-i, c(4,6)]
+    current.train.labels <- cars.clean.sample[-i, 1]
+    
+    #do knn with above 2 data sets
+    pred[i] <- as.character(knn(current.train, current.test, current.train.labels$Brand, k))
+  }
+  
+  #Calculate the accuracy of knn for given k value
+  LOOCV.prop[k] <- mean(as.character(pred) == as.character(cars.clean.sample$Brand))
+  print(k)
+}
+```
+
+This nice histogram shows how different values of k result in better or worse classifications of car brand. The max tells me that in this sample about 55% of the classifications are accurate with some k. Unfortunately I had trouble filtering the data, but by looking at LOOCV.prop I can easily find that this value occurs when k = 24.
+
+```{r}
+hist(LOOCV.prop)
+
+max(LOOCV.prop)
+
+view(LOOCV.prop)
+```
+
+3) So, I've determined my optimum k to be 24, though many other k-values produce a similar accuracy in classification.
+
+I decide to use 24 as a start value to create my predictions. I had to write a function to normalize my numeric predictors and return a prediction value in the form of a Brand.
+
+```{r}
+#Creating scaled versions of variables and then writing a function for testing
+
+#mode function
+MaxTable <- function(x){
+  dd <- unique(x)
+  dd[which.max(tabulate(match(x,dd)))]
+}
+
+#scaled variables
+cars.clean.sample.new <- cars.clean.sample %>%
+  mutate(km.scaled = (`KMs Driven` - mean(`KMs Driven`))/sd(`KMs Driven`),
+         price.scaled = (Price - mean(Price))/sd(Price))
+
+#function
+cars.scaled <- function(test.km, test.price, k) {
+  test.km.scaled <- (test.km - mean(cars.clean.sample$`KMs Driven`))/sd(cars.clean.sample$`KMs Driven`)
+  test.price.scaled <- (test.price - mean(cars.clean.sample$Price))/sd(cars.clean.sample$Price)
+  
+  cars.clean.sample.new %>%
+    mutate(distance = ((km.scaled - test.km.scaled)^2 + (price.scaled - test.price.scaled)^2) ) %>%
+    arrange(distance) %>%
+    head(k) %>%
+    summarize(knn.result = MaxTable(Brand)) %>%
+    .[[1]] %>%
+    return()
+}
+```
+
+Next I created some grids of values in order to create visualizations that can show how knn created classifications for the car data. I tried to make these grid limits so that most of the data, with the exception of outliers, would be visible somewhere on the grid.
+
+```{r}
+km.grid <- seq(from = 1, to = 500000, by = 10000)
+price.grid <- seq(from = 50000, to = 3000000, by = 50000)
+
+grid <- expand.grid(km.grid, price.grid)
+
+```
+
+Finally I use my function and the grid values to create predictions for the brand of cars with different combinations of price and kilometers driven. By overlaying a plot of the actual data, I can see how the model created classifications that accurately classify a good portion of my data.
+
+```{r}
+knn.k24 <- grid %>%
+  group_by(Var1, Var2) %>%
+  mutate(prediction = cars.scaled(Var1, Var2, 24))
+
+#filtering data to make visualizations a bit clearer:
+#there are so many brands that the graph can easily get cluttered;
+#additionally, my knn model only predicted three classifications,
+#namely Suzuki, Toyota, and Honda
+cars.clean.sample.new.filtered <- cars.clean.sample.new %>%
+  filter(Price <= 3000000) %>%
+  filter(`KMs Driven` <= 500000) %>%
+  filter(Brand %in% c('Suzuki', 'Toyota', 'Honda'))
+
+knn.k24 %>%
+  ggplot(aes(x = Var1,
+             y = Var2)) +
+  geom_point(aes(color = factor(prediction)),
+             size = 2,
+             alpha = 0.3) +
+  geom_point(data = cars.clean.sample.new.filtered,
+             mapping = aes(x = `KMs Driven`,
+                           y = Price,
+                           color = factor(cars.clean.sample.new.filtered$Brand,
+                                          levels = c('Toyota', 'Suzuki', 'Honda')),
+             size = 1))
+
+
+```
+
+I'll display a few different k-values to provide comparison.
+
+```{r}
+knn.k1 <- grid %>%
+  group_by(Var1, Var2) %>%
+  mutate(prediction = cars.scaled(Var1, Var2, 1))
+
+knn.k1 %>%
+  ggplot(aes(x = Var1,
+             y = Var2)) +
+  geom_point(aes(color = factor(prediction)),
+             size = 2,
+             alpha = 0.3) +
+  geom_point(data = cars.clean.sample.new.filtered,
+             mapping = aes(x = `KMs Driven`,
+                           y = Price,
+                           color = factor(cars.clean.sample.new.filtered$Brand,
+                                          levels = c('Toyota', 'Suzuki', 'Honda')),
+                           size = 1))
+```
+
+Try k = 10.
+
+```{r}
+knn.k10 <- grid %>%
+  group_by(Var1, Var2) %>%
+  mutate(prediction = cars.scaled(Var1, Var2, 10))
+
+knn.k10 %>%
+  ggplot(aes(x = Var1,
+             y = Var2)) +
+  geom_point(aes(color = factor(prediction)),
+             size = 2,
+             alpha = 0.3) +
+  geom_point(data = cars.clean.sample.new.filtered,
+             mapping = aes(x = `KMs Driven`,
+                           y = Price,
+                           color = factor(cars.clean.sample.new.filtered$Brand),
+                           size = 1))
+```
+
+Try k = sqrt(n) = 112 (approx)
+
+```{r}
+knn.k112 <- grid %>%
+  group_by(Var1, Var2) %>%
+  mutate(prediction = cars.scaled(Var1, Var2, 112))
+
+knn.k112 %>%
+  ggplot(aes(x = Var1,
+             y = Var2)) +
+  geom_point(aes(color = factor(prediction)),
+             size = 2,
+             alpha = 0.3) +
+  geom_point(data = cars.clean.sample.new.filtered,
+             mapping = aes(x = `KMs Driven`,
+                           y = Price,
+                           color = factor(cars.clean.sample.new.filtered$Brand,
+                                          levels = c('Toyota', 'Suzuki','Honda')),
+                           size = 1))
+```
+
+Such nice visualizations. Sub-optimal values of k certainly changed the visualizations; for example, choosing k = 1 allows me to see more classification zones for different brands, although in this context I don't think this will help the accuracy of the knn algorithm. Using knn = 112 which is approximately the square root of n, I find that Hondas, Toyotas, and Suzukis are the most prominent brands in the data set. I wouldn't say that any of the boundaries I saw were really that intuitive... I guess it makes sense that a Toyota costs more than a Honda which costs more than a Suzuki, in general.
+
+4) There were certainly some advantages and disadvantages to using KNN in this context.
+
+First and foremost, one disadvantage is that I would not argue that kilometers driven and price are very good numerical predictors of the brand of a car; they were surprisingly good, and they were the only two numerical predictors that really made much sense in my data set, but I think there are probably better predictors out there; maybe adding age of the car for example could have made my models better.
+
+Second, knn seemed to simplify this problem in order to return a high accuracy in predicting the brand of the car. Over 60% of the cars in the data set were either Toyotas or Suzukis; accordingly, knn made the Toyota and Suzuki prediction regions the largest in the grid visualizations. In fact, with the optimum k value of 24, knn only predicted 3 brands of car; Toyota, Suzuku, and Honda. Although the accuracy of predictions was about 54%, the algorithm neglected the majority of the over 250 car brands in the data set and kind of cheated in order to achieve a high accuracy. This seems to be a major short-coming of knn; in a data set like this in which there are a very large number of factors, the algorithm has trouble predicting for values that are not highly represented. They get lost.
+
+The advantages to knn are that it was relativley easy to implement and did a surprisingly good job 'predicting' the brand of a car based upon two simplistic numerical indicators. The grid visualizations are quite detailed for k values that are small. Most notably, I do think knn told me something about my data that regression could not have in the same way. Using my optimum k-value, I did learn something about Hondas, Suzukis, and Toyotas in Pakistan. Of the used cars in Pakistan, Hondas, Suzukis, and Toyotas have all been driven about the same distance (approx 7500 km), and Toyotas are generally more expensive than Hondas which are more expensive than Suzukis. The one grid visualization that I created shows this is a concise and attractive way that seems unique to knn. I suppose regression certainly could have helped me learn this... but I was able to perform this analysis quickly with a number of different factors and implement them all in a single graphic. I'd say that's a win for knn.
+
+Overall, I was surprised that knn could predict the brand of the car with a decent degree of accuracy. With more data I bet the algorithm could do a lot better.

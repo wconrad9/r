@@ -1,0 +1,163 @@
+---
+title: "Problem Set 3"
+author: "Walter Conrad"
+date: "10/9/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+After determining the annual production and transportation costs for Supplier A and Supplier B, I have determined that Supplier B is the better choice. Although Supplier B's production cost is a bit higher than Supplier A's, shipping from Supplier B is much cheaper, and the overall total annual cost is much lower if Tool Depot chooses Supplier B.
+
+I will explain the code that allowed me to perform this analysis.
+
+First I ran the necessary libraries and imported the necessary data tables.
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(gtable)
+library(dplyr)
+library(lubridate)
+library(readxl)
+```
+
+```{r}
+library(readxl)
+Carrier_Rates <- read_excel("~/Desktop/Intro to Data Science/Homework/Homework 3/HW3.completed.summary.xlsx", 
+    sheet = "Carrier Rates", col_types = c("text", 
+        "text", "text", "numeric"))
+```
+
+```{r}
+library(readxl)
+Historical_Orders <- read_excel("~/Desktop/Intro to Data Science/Homework/Homework 3/HW3.completed.summary.xlsx", 
+    sheet = "Historical Orders", col_types = c("date", 
+        "text", "text", "text", "numeric", 
+        "numeric", "numeric"))
+```
+
+```{r}
+library(readxl)
+Historical_Shipments <- read_excel("~/Desktop/Intro to Data Science/Homework/Homework 3/HW3.completed.summary.xlsx", 
+    sheet = "Historical Shipments", col_types = c("date", 
+        "text", "text", "numeric"))
+```
+
+
+
+Next I joined the data sets in order to perform analysis. First I left joined historical shipments with the carrier rates for carriers X and Y.
+
+```{r}
+shipments.by.rates <- left_join(Historical_Shipments,
+         Carrier_Rates)
+
+  shipments.by.rates
+```
+
+Next I joined the historical orders by the historical shipments using a left join.
+
+```{r}
+orders.by.shipments <- left_join(Historical_Orders,
+                                 Historical_Shipments,
+                                 by = c("Str Nbr",
+                                        "Supplier",
+                                        "Order Dt" = "Shipment Date"))
+
+orders.by.shipments
+```
+
+Next I created the first of my "master" tables by joining both the previous two joined tables. This gave me enough information in one table to mutate the necessary columns for analysis.
+
+```{r}
+master <- left_join(orders.by.shipments,
+                    shipments.by.rates,
+                    by = c("Str Nbr",
+                           "Supplier",
+                           "Order Dt" = "Shipment Date"))
+
+master
+```
+
+Next I created a "final.master" table. This table included the following mutated values: hammer_orders, real_hammer_orders,total_weight,ship_cost, and product_cost. Most of these values are self-explanatory. hammer_orders is a value derived from the number of wrench orders multiplied by a factor of 1.1 because hammer orders are expected to mirror wrench orders, and we expect a 10% increase in orders each year. real_hammer_orders simply applied the hammer_orders value to all origin-destination combinations (A1,A2,B1,B2) because in our data, store 1 is the only store that receives wrench shipments, but theoretically either store 1 or 2 from either Supplier A or B could receive hammers. total_weight is the total weight of a shipment for an origin-destination pair for a given week; this value is used to then calculate the ship_cost for that shipment in a given week. product_cost simply applies the product cost for Supplier A or B to the number of hammer orders.
+
+```{r}
+final.master <- master %>%
+  group_by(week(`Order Dt`),
+           `Str Nbr`) %>%
+  mutate(hammer_orders = ifelse(`Product Id` == 1,
+                                `Order Qty` * 1.1,
+                                0)) %>%
+  mutate(real_hammer_orders = max(hammer_orders)) %>%
+  group_by(Carrier) %>%
+  mutate(total_weight = 2 * real_hammer_orders + Weight.x) %>%
+  mutate(ship_cost = ifelse(Carrier == "X", Cost, Cost * real_hammer_orders * 2 + Cost * Weight.x)) %>%
+  mutate(product_cost = ifelse(Supplier == "A",
+                             .80 * real_hammer_orders,
+                             .82 * real_hammer_orders))
+
+final.master
+```
+
+
+Using this final.master graph, I then filtered by Supplier and calculated minimum shipping costs for each week for both origin-destination combinations A1,A2 and B1,B2 respectively. Calculating product costs was as simple as summing the product cost for one supplier each week and dividing by a factor corresponding to the number of times the value was repeated each week in my table.
+
+```{r}
+#Annual Shipping Cost A
+final.master %>%
+  filter(Supplier == "A") %>%
+  group_by(week(`Order Dt`),
+           `Str Nbr`) %>%
+  mutate(min_ship_cost = min(ship_cost)) %>%
+  ungroup() %>%
+  group_by(week(`Order Dt`)) %>%
+  mutate(total_weekly_ship_cost = max(min_ship_cost)+min(min_ship_cost)) %>%
+  ungroup() %>%
+  summarize(annual_ship_cost = sum(total_weekly_ship_cost/8))
+```
+```{r}
+#Annual product cost A
+final.master %>%
+  filter(Supplier == "A") %>%
+  ungroup() %>%
+  summarize(annual_product_cost = sum(product_cost/4))
+```
+```{r}
+#Annual shipping cost B
+final.master %>%
+  filter(Supplier == "B") %>%
+  group_by(week(`Order Dt`),
+           `Str Nbr`) %>%
+  mutate(min_ship_cost = min(ship_cost)) %>%
+  ungroup() %>%
+  group_by(week(`Order Dt`)) %>%
+  mutate(total_weekly_ship_cost = max(min_ship_cost)+min(min_ship_cost)) %>%
+  ungroup() %>%
+  summarize(annual_ship_cost = sum(total_weekly_ship_cost/4))
+```
+```{r}
+#Annual product cost B
+final.master %>%
+  filter(Supplier == "B") %>%
+  ungroup() %>%
+  summarize(annual_product_cost = sum(product_cost/2))
+```
+
+Using this information, I filled out the summary table and determined that Supplier B is the best choice for Tool Depot, mainly because the costs of shipping from Supplier B are substantially less than the cost to ship from Supplier A.
+
+
+```{r}
+library(readxl)
+Summary <- read_excel("~/Desktop/Intro to Data Science/Homework/Homework 3/HW3.completed.summary.xlsx")
+
+Summary
+```
+
+
+

@@ -1,0 +1,164 @@
+---
+title: "PSet2"
+author: "Walter Conrad"
+date: "9/25/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+```{r}
+library(babynames)
+library(openintro)
+library(tidyverse)
+```
+
+1) I arranged the data set and found that the top ten most common baby names were as follows: James, John, Robert, Michael, Mary, William, David, Joseph, Richard, and Charles. By viewing the table below you can see the corresponding number of babies born with each name between the period of 1880-2017.
+
+```{r}
+babynames %>%
+  group_by(name) %>%
+  summarize(number = sum(n)) %>%
+  arrange(-number)
+```
+
+
+2) This graph shows the relationship between number of births in the US over the time period of 1880-2017. The graph trends upward from about 1880 - 1910, at which point it begins to increase steeply until around 1920. A slight dip in birth rates between 1920 and 1940 could be due to the great depression. Afterwards, the graph increases dramatically once again which could be a reflection of the historical "Baby Boomers" period between 1946 - 1964. After about 1960, the graph dips for a brief period, and then stagnates until 2017. The plateau is a common trend in developed countries where a higher birth rate no longer yields significant benefits for the family.
+
+```{r}
+babynames %>%
+  group_by(year) %>%
+  summarize(births = sum(n)) %>%
+  ggplot(mapping = aes(x = year,
+                       y = births)) +
+  geom_point(size = 1) +
+  geom_smooth(se = FALSE)
+```
+
+
+3) A .gov site I found on the internet reported the total number of births to be about 4.06 million babies in 2000. The discrepancy in number of births is approximately 280,000 babies. By checking the help documentation, I found a possible reason for the difference between these two sources. In a slightly contradictory statement, the help documentation states: "Full baby name data provided by the SSA. This includes all names with at least 5 uses." This implies that perhaps there were a lot of babies born in the year 2000 that had unusual names and were not counted in babynames, but that were counted by the government statistic. All together, they must have accounted for the difference in babies suggested by this data. In actuality, the two figures should be roughly the same because if a baby is born and given a name, as one imagines all babies are, then it would show up in this data set. The only explanation we can logically gie is that some of the names were not included in babynames because they were so uncommon while the government still counted these births.
+
+(from: https://www.cdc.gov/nchs/data/nvsr/nvsr50/nvsr50_05.pdf )
+
+```{r}
+babynames %>%
+  group_by(year) %>%
+  filter(year == "2000") %>%
+  summarize(births = sum(n))
+```
+
+4) First I ran the code below to find a list of the longest names given to at least 1000 babies. "Maryelizabeth" was the longest name, with 13 characters.
+
+```{r}
+babynames %>%
+  group_by(name) %>%
+  filter(sum(n) >1000) %>%
+  mutate(name.length = nchar(name, type = "chars")) %>%
+  arrange(-name.length)
+```
+
+I then ran the next block, filtering out Christopher so I could see which name was second longest. I found that Michaelangelo, also length 13, was given to over 1000 babies as well.
+
+```{r}
+babynames %>%
+  group_by(name) %>%
+  filter(sum(n) >1000) %>%
+  filter(name != "Maryelizabeth") %>%
+  mutate(name.length = nchar(name, type = "chars")) %>%
+  arrange(-name.length)
+```
+
+
+I wanted to check if any other names also had length 13 and were given to over 100 babies, so I checked the data set for any such names. It turns out that "Maryelizabeth" and "Michaelangelo" are the only two names that meet these conditions.
+
+```{r}
+babynames %>%
+  group_by(name) %>%
+  filter(sum(n) >1000) %>%
+  mutate(name.length = nchar(name, type = "chars")) %>%
+  filter(name.length == "13") %>%
+  summarize(namelength = mean(name.length))
+```
+
+
+5) Over time, the average name length has increased, though the difference is quite small. In the entire 1880-2017 period, the average name length has fluctuated between a range of 5.9 to 6.35 characters. From 1880 to about 1920, the average name length rose fairly steadily - it then plateaued from 1920 to about 1950 before dipping slightly until 1960. After 1960, average name length rose quite steeply to a peak of about 6.2 letters in 1990. Since then, the average name length has decreased, and in 2017 the average name length was slightly under 5.9 characters.
+
+```{r}
+babynames %>%
+  group_by(year) %>%
+  mutate(name.length = nchar(name, type = "chars")) %>%
+  mutate(total.chars = name.length * n) %>%
+  summarize(avg.name.length = sum(total.chars)/sum(n)) %>%
+  ggplot(mapping = aes(x = year,
+                       y = avg.name.length)) +
+  geom_line(size = 1)
+```
+
+
+6) First I manipulated the babynames data in order to perform analysis about the gender association of different names. I wanted to find the names that had a switch in gender association when comparing data from 1880 to data from 2017.
+
+```{r}
+setup <- babynames %>%
+  group_by(name, year) %>%
+  #filter(name %in% c("Donnie", "Leslie", "Robbie")) %>%
+  mutate(gender.assoc = ifelse(sex == "M", 1, -1)) %>%
+  mutate(indicator = (gender.assoc*n)) %>%
+  mutate(prop1 = mean(indicator)) %>%
+  mutate(prop2 = mean(n)) %>%
+  mutate(proportion = mean(prop1/prop2)) %>%
+  mutate(test = max(proportion)-min(proportion))
+```
+
+Using this data set, I then made a new calculation to see which names had the biggest change in gender association in 1880 vs 2017. I found that three names, "Donnie", "Leslie", and "Robbie" all changed dramatically, so I chose to include these three names in my final graph.
+
+```{r}
+setup %>%
+  filter(year %in% c(1880, 2017)) %>%
+  filter(sex == "F") %>%
+  group_by(name) %>%
+  summarize(some.math = max(proportion) - min(proportion)) %>%
+  arrange(-some.math)
+```
+
+Finally, I filtered my setup data set to include only these top 3 names, and I used their data to plot my graph.
+
+```{r}
+setup <- babynames %>%
+  group_by(name, year) %>%
+  filter(name %in% c("Donnie", "Leslie", "Robbie")) %>%
+  mutate(gender.assoc = ifelse(sex == "M", 1, -1)) %>%
+  mutate(indicator = (gender.assoc*n)) %>%
+  mutate(prop1 = mean(indicator)) %>%
+  mutate(prop2 = mean(n)) %>%
+  mutate(Proportion.of.Gender.Association = mean(prop1/prop2)) %>%
+  mutate(test = max(Proportion.of.Gender.Association)-
+           min(Proportion.of.Gender.Association))
+```
+
+```{r}
+setup %>%
+  ggplot(mapping = aes(x = year,
+                       y = Proportion.of.Gender.Association)) +
+  geom_line(aes(color = name)) +
+  #geom_smooth(se = FALSE, aes(color = name, fill = name)) +
+  geom_label(x=1880,
+            y=1.0,
+            label = "M",
+            size = 5) +
+  geom_label(x = 1880,
+            y = -1.0,
+            label = "F",
+            size = 5) +
+  xlab("Year")+
+  ylab("Proportion of Name-Gender Association")
+```
+
+The graph clearly shows that the gender association for these three names changed dramatically from 1880 - 2017. The y = -1 axis on this graph corresponds to a female gender association, while the y = 1 axis corresponds to a male gender assocation. The line represents the proportion of genders of individuals with that name - so if the line is below y = 0, then proportionately more females have the name in that year, whereas if the line is above y = 0, proportionately more males have the name in that year. Evidently, Donnie was predominantly a female name before about 1930, but after that point it was predominantly given to males. Robbie was predominantly a female name until about 1960, after which point it was predominantly given to males. On the other hand, Leslie was a name given to males until after 1940, when the name started to predominantly be given to females.
+
+This graph does a good job showing the trend for these three names, but one has to remember that I filtered my data set by names that were present in 1880 and 2017. There could have been other names that had a change in predominant gender assocation, but perhaps these names weren't used at all in either 1880 or 2017, and so they would be omitted from my graph.
+
+Instead of the geom_text function, I used the geom_label function to create small captions for the axes that inform viewers about the name-gender association for the y = 1 and y = -1 axes. I hope this is a legitimate substitue for the geom_text function; I could have used geom_text to achieve the same goal, but the result would have been less visually pleasing.

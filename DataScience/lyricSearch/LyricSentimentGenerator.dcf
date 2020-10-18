@@ -1,0 +1,12 @@
+name: LyricSentimentGenerator
+title: LyricSentimentGenerator
+username:
+account: walter-conrad-data-visualization
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1488276
+bundleId: 2598149
+url: https://walter-conrad-data-visualization.shinyapps.io/LyricSentimentGenerator/
+when: 1574097213.75575
+asMultiple: FALSE
+asStatic: FALSE

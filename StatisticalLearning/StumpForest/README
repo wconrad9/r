@@ -1,0 +1,3 @@
+Created a custom random forest of 'Stumps' or decision trees
+with only 1 split. Surprisingly, an aggregated stump forest can still
+make for an excellent predictive model!

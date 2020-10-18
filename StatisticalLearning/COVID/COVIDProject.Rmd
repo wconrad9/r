@@ -1,0 +1,667 @@
+---
+title: "MATH 0218 Final Project: Covid-19"
+author: "Walter Conrad, Jack Decker, and Henry Mound"
+date: "5/18/2020"
+output: html_document
+---
+
+For our final project, we located a collection of data sets containing information regarding the current coronavirus pandemic. The data can be found on kaggle.com under the headline "Uncover Covid-19 Challenge". This collection contains dozens of data sets covering topics from Covid-19 cases, airport closings, mobility, ICU admissions, blood work of patients, and more. We do not use most of these files, but have chosen a few of them to conduct our analysis on. They are mentioned throughout the project when we use them. In our project, we use various statistical models, at first to examine which types of counties are more susceptible to the virus at large, and then to examine which types of patients are more at risk individually.
+
+One of the most basic, yet useful, statistical models is ordinary least squares linear regression. Using county-level data on Covid-19 cases and various demographic qualities of counties, we attempt to predict case rates and death rates with several variables of interest.
+
+We start by loading packages we will need:
+
+```{r}
+library(tidyverse)
+library(stringr)
+```
+
+Now we load three datasets for county-level data. The first contains information on Covid-19 cases and deaths by county, the next contains health data by county, and the last contains social vulnerability data by county. 
+
+```{r}
+county_cases <- read_csv('./US_counties/county_case_data.csv')
+county_health_data <- read_csv('./US_counties/county_health_rankings.csv')
+county_svi <- read_csv('./US_counties/social_vulnerability_index.csv')
+```
+
+Now we clean the data and mutate new columns, one is a case rate and the other is a mortality rate (number of deaths per cases).
+
+```{r}
+#cleaning health data
+aian_indexes <- str_detect(colnames(county_health_data), 'aian')
+black_indexes <- str_detect(colnames(county_health_data), 'black')
+hispanic_indexes <- str_detect(colnames(county_health_data), 'hispanic')
+white_indexes <- str_detect(colnames(county_health_data), 'white')
+asian_indexes <- str_detect(colnames(county_health_data), 'asian')
+percent_indexes <- str_detect(colnames(county_health_data), '95percent')
+
+indexes <- NULL
+
+for(i in 1:507) {
+  if(percent_indexes[i] == TRUE ||
+     asian_indexes[i] == TRUE ||
+     aian_indexes[i] == TRUE ||
+     black_indexes[i] == TRUE ||
+     hispanic_indexes[i] == TRUE ||
+     white_indexes[i] == TRUE) {
+      
+      indexes[i] = i
+    }
+  else{
+    indexes[i] = 9
+  }
+}
+
+county_health_data_clean <- county_health_data[,-c(unique(indexes))]
+
+#health stats and county case rates data set
+health_and_cases <- left_join(county_cases,
+                              county_health_data_clean,
+                              by = c('fips'))
+
+#cleaning 
+county_svi_cut <- county_svi[,-c(1:4)]
+
+M_indexes <- str_detect(colnames(county_svi_cut), 'M_')
+MP_indexes <- str_detect(colnames(county_svi_cut), 'MP_')
+
+indexes2 <- NULL
+
+for (i in 1:119) {
+  
+  if(M_indexes[i] == TRUE ||
+     MP_indexes[i] == TRUE) {
+    indexes2[i] = i
+  }
+  else{
+    indexes2[i] = 5
+  }
+}
+
+#cleaning social vulnerability data
+county_svi_subset <- county_svi_cut[,-c(unique(indexes2))]
+
+colnames(county_svi_subset)[1] = 'fips'
+
+county_svi_subset$fips <- as.numeric(county_svi_subset$fips) 
+
+#overall county data set, containing information about case rates, health statistics, and #social vulnerability metrics
+county_overall <- left_join(health_and_cases,
+                           county_svi_subset,
+                           by = c('fips'))
+
+county_overall_subset <- county_overall %>%
+  filter(date == '2020-04-27') %>% 
+  filter(!is.na(fips))
+
+county_overall_subset <- county_overall_subset %>%
+  mutate(covid_caserate = cases/population) %>%
+  mutate(covid_deathrate = deaths/cases)
+```
+
+Now, we are ready to run some linear regression. Let's look at a graph of mortality rate and percent physically inactive. The hypothesis here is that the more physically inactive a county is, the higher the death rate will be there, as there has been scientific news linking fitness to lessening the risk of Covid-19. 
+
+```{r}
+county_overall_subset %>%
+  ggplot(aes(x = percent_physically_inactive, y = covid_deathrate)) +
+  geom_point() +
+  ggtitle("Covid-19 Mortality Rates in Counties by Physical Activity") +
+  xlab("Percent Physically Inactive") +
+  ylab("Covid-19 Mortality Rate") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14)) +
+  theme(axis.text.x = element_text(color="black", size = 10)) + 
+  theme(axis.text.y = element_text(color="black", size = 10)) +
+  theme(axis.title.x = element_text(color="black", size = 11)) +
+  theme(axis.title.y = element_text(color="black", size = 11)) +
+  theme(legend.position="none") +
+  theme(panel.grid.minor = element_blank())
+```
+
+It is quite hard to tell from this graph given the large amount of data points and their tendency to cluster toward lower values. Let's try zooming in to only death rates of 0 to 0.25. 
+
+```{r}
+county_overall_subset %>%
+  filter(covid_deathrate < 0.25) %>%
+  ggplot(aes(x = percent_physically_inactive, y = covid_deathrate)) +
+  geom_point() +
+  ggtitle("Covid-19 Mortality Rates in Counties by Physical Activity") +
+  xlab("Percent Physically Inactive") +
+  ylab("Covid-19 Mortality Rate") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14)) +
+  theme(axis.text.x = element_text(color="black", size = 10)) + 
+  theme(axis.text.y = element_text(color="black", size = 10)) +
+  theme(axis.title.x = element_text(color="black", size = 11)) +
+  theme(axis.title.y = element_text(color="black", size = 11)) +
+  theme(legend.position="none") +
+  theme(panel.grid.minor = element_blank())
+```
+
+There still appears to not be too strong of a correlation, although often times it is hard to tell visually. We can use linear regression to determine if the relationship is statistically significantly above 0.
+
+```{r}
+lm.model.1 <- lm(covid_deathrate ~  percent_physically_inactive,
+             data = county_overall_subset)
+
+summary(lm.model.1)
+```
+
+In looking at the summary output, the coefficient on percent physically inactive is indeed positive, which is consistent with our intuition. However, the p-value attached to this is high, suggesting that we can not conclude that the relationship observed is statistically significant. This means that it could actually be 0 and the reason we observed what we did is just due to sampling variance. 
+
+One of the advantages of linear regression is that it can control for other relationships by adding them to the model. Physical inactivity may actually be significant once we control for things like how rural the county is, how much poverty is in the county, etc. We will run another regression model, this time with more variables.
+
+```{r}
+lm.model.2 <- lm(covid_deathrate ~  percent_physically_inactive
+                 + percent_rural + percent_smokers 
+                 + percent_adults_with_obesity 
+                 + primary_care_physicians_rate 
+                 + percent_fair_or_poor_health + EP_AGE65 
+                 + EP_CROWD + E_GROUPQ + EP_POV 
+                 + SPL_THEMES + RPL_THEMES,
+             data = county_overall_subset)
+
+summary(lm.model.2)
+```
+
+In adding in many variables, we control for a lot of different characteristics of the county. It turns out that in this case, physical activity is still not statistically significant. However, two variables that we can be pretty sure have a significant relationship to the mortality rate of covid-19 are percent rural and estimated percentage of citizens above age 65. The second one is obvious; one of the main risk factors for passing away from the virus is age. The first one, percent rural, makes sense for case rates, as the more rural a county is, the less likely it is that covid-19 will spread quickly there. However, more rural counties, on average, have lower mortality rates, even after controlling for the health of the population and the poverty rate, among other variables. This could potentially be due to the fact that rural counties are experiencing lower case rates and therefore are able to treat the cases that they do have with more attention. 
+
+We can compare the effectiveness of the two models using a quantitative metric. Since linear regression models are not classifcation techniques, things like accuracy, precision, and recall do not apply. However, mean squared error (MSE) is a good default metric to use. Mean squared error represents the average squared distance that the actual data point is from the value the model predicts. 
+
+```{r}
+mean(lm.model.1$residuals^2)
+mean(lm.model.2$residuals^2)
+```
+
+Not surprisingly, the MSE of the second model, which includes more information for the model to predict on, is lower. However, not by much. This is because both models are pretty bad, in the sense that the relationships are often not significant. 
+
+Why is it that these models are performing quite poorly? One possible explanation is that they do not control for testing. The data we have on case rates and mortality rates inherently depends on how many tests are being given. Currently, there is a large issue of lack of tests in the U.S., which may inherently hide the actual relationship between case rates and mortality rates and the variables used in the models above. 
+
+Another explanation could just be that there is an element of arbitrariness involved in how Covid-19 has spread. Given how quickly this scenario is evolving, mortality rates in different counties could be subject to the somewhat unpredictable element of where the virus spread first. Over time, the predictive power of certain variables may appear, but for now, it could be getting masked by the fact that the virus is spreading quickly and just so happened to hit certain areas first. (Literature surrounding other viruses lends credence to this hypothesis, such as information about the flu, which has had many years to "stablize" all around the country. Such as the following article: https://psmag.com/social-justice/the-flu-hits-harder-in-poorer-neighborhoods. )
+
+Other models that can be used to graph relationships between two quantitative variables include splines and smoothing splines. These techniques capture non-linear relationships, which often invalidate linear regression. However, based on the graphs above, the data seems to be more scattered than representing any sort of relationship, so splines won't work. 
+
+Classification models, such as KNN, LDA, and random forests, are not easily used to predict quantitative outcomes. We could convert one of our variables of interest in this case to a categorical variable. For example, a binary indicator of whether the mortality rate is over, say, 3 percent. However, this loses a lot of information about the magnitude of the outcome variable. We will use classification models later on data more suited for them.
+
+It might make sense to use some unsupervised learning to see if we can uncover any other unexpected relationships in our data set that could explain the results we are seeing. To start, we'd like to explore the relationship between the number of tests and the rate of infection reported. We use a dataset that includes county-level testing information for the state of New York.
+
+```{r}
+ny_tests <- read_csv('./US_counties/ny_testing.csv')
+```
+
+
+We clean and join the data, then filter our overall county data set by counties in New York. We decide to filter the data to look at a single date - April 26, 2020. Our rationale behind this choice is that Covid had been detected in every county in New York by this time, and the rate of infection had been growing in each county up until this point. By isolating a single day, we might be able to better see how different county health and/or social vulnerability predictors affected the growth rate of covid in any given New York county. By April 26, the virus had the same amount of time to affect a county, but we will see that different counties have different levels of infection.
+
+```{r}
+ny_overall <- county_overall %>%
+  filter(state.x == 'New York')
+
+ny_overall_testing <- left_join(ny_overall,
+                                ny_tests,
+                                by = c('county.x' = 'county',
+                                       'date' = 'test_date'))
+
+ny_overall_testing <- ny_overall_testing %>%
+  filter(county.x != 'New York City') %>%
+  mutate(case_pop_proportion = cases / E_TOTPOP) %>%
+  mutate(death_pop_proportion = deaths / E_TOTPOP) %>%
+  mutate(pop_density = E_TOTPOP / AREA_SQMI) %>%
+  filter(date == '2020-04-26')
+```
+
+We also mutated a few columns to help create some new linear models in the future. We have added a population density column, a cases-to-population ratio response variable, and a deaths-to-population ratio response variable. It's time to see if unsupervised learning can help us create a better model. First we'll try hierarchical clustering. We subset the data by only including columns that seem relevant to predicting infection rate. We then scale these metrics, and then create a distance matrix with the results. Finally, using the distance matrix we can create a hierarchical clustering model for the data.
+
+```{r}
+ny_numbers <- ny_overall_testing[,c(12,14,16,21,23,27,31,43,45,46,53,54,61,64,76,77,97,99,100,158, 167, 170)]
+
+ny_numbers_scaled <- scale(ny_numbers)
+
+ny_numbers_dist <- dist(ny_numbers_scaled)
+
+hc1 <- hclust(ny_numbers_dist)
+```
+ Using the library dendextend we can visualize a dendrogram that displays the clustering. We create two visualizations - comparing them might help us find predictors. Our first clustering uses the county names as labels; our second uses the number of cases reported on April 26 as the label.
+ 
+```{r}
+hc1 %>%
+  as.dendrogram() %>%
+  place_labels(ny_overall_testing$county.x) %>%
+  set('labels_cex', .3) %>%
+  color_branches(k = 3) %>%
+  color_unique_labels() %>%
+  plot()
+
+hc1 %>%
+  as.dendrogram() %>%
+  place_labels(ny_overall_testing$cases) %>%
+  set('labels_cex', .3) %>%
+  color_branches(k = 3) %>%
+  color_unique_labels() %>%
+  plot()
+```
+Interestingly, some of our highest numbers of cases are all occurring in the same red cluser on the left of the dendrogram. The dendrogram indicates that these 4 counties - Rockland, Westchester, Nassau, and Suffolk - are all significantly different from the rest of the counties in New York across the predictor variables we chose. Their branch on the dendrogram occuras at around 15, the highest y-vale. Additionally, these 4 counties seem to have the most cases of covid. We summarize across the statistics we chose to see how the predictors vary in these 4 counties, this time including county name and case numbers to aid in visualization. 
+
+```{r}
+ny_hclust_summary <- ny_overall_testing[,c(2,5,12,14,16,21,23,27,31,43,45,46,53,54,61,64,76,77,97,99,100,158,167,170)]
+
+
+ny_hclust_summary %>%
+  mutate(cluster_test = ifelse(county.x %in% c('Rockland','Westchester', 'Suffolk', 'Nassau'), 1, 0)) %>%
+  group_by(cluster_test) %>%
+  summarize_all(mean)
+```
+ 
+These results are very interesting. Across many predictors that we would assume to have a positive correlation with the rate of infection, our data shows otherwise. In the four counties listed above, we see that the average number of infections is 26,375 compared to 458 in the rest of New York. However, we see that the fewer people in those people are of fair or poor health; they have fewer physically unhealthy days; they have fewer mentally unhealthy days; a lower percentage are smokers; a lower percentage are obese; a lower percent are phyically inactive; a smaller percent drink excessively; more people are insured; there are more primary care_physicians and mental health providers; more people are vaccinated; there's a higher high school graduation rate; income is higher; a smaller percentage of the population is 65 and older. It seems that all of our common sense understanding about what contributes to a person's health is turned up! However, in the last few columns, we get a hint about why the significant difference in number of cases exists. The four counties in question are 1.7 percent rural compared to 51.7 average in the other counties. Additionally, their population are an order of magnitude greater than the other counties on average. They also have a significantly higher percentage of severe housing problems, and more overcrowding per household.
+
+All of this information helps to make a good argument for social distancing protocols. It really does seem that the proximity of people alone is a very good indicator for how many people end up getting infected. We decide to see if clustering by kmeans could lead to similar insights. Because there isn't any inherent number of clusters, we test a range of values. Our results from hierarchical clustering indicate that 3 clusters might be a good number.
+
+```{r}
+tot <- NULL
+for(i in 1:10){
+  km <- kmeans(ny_numbers_scaled,
+               i)
+  
+  tot[i] <- km$tot.withinss/i
+}
+
+plot(tot)
+
+```
+
+
+We see that 3 clusters is a pretty good choice. In fact, using 4 clusters results in a low sum of squares within clusters, and adding more clusters only has a minimal effect on reducing the sum of squares. Let's try kmeans with 4 clusters. We bind the cluster data with the New York data to see how these clusters vary across the predictors.
+
+```{r}
+km1 <- kmeans(ny_numbers_scaled,
+              4)
+
+
+ny_clusters <- cbind(ny_overall_testing, km1$cluster)
+
+ny_clusters %>%
+  group_by(km1$cluster) %>%
+  summarize(average_cases = mean(cases),
+            average_deaths = mean(deaths),
+            average_pop = mean(E_TOTPOP))
+
+ny_clusters %>%
+  filter(km1$cluster == 4) %>%
+  select(county.x)
+
+```
+
+We see that cluster 4 has signicantly more cases than any of the other clusters - it also has the largest average population by quite a bit. Notably, the cluster with the second highest number of average cases has the second highest average population. The names of the 4 counties in cluster 4? The same 4 that we saw with the highest case rates in our hierarchical clustering.
+
+```{r}
+ny_clusters %>%
+  as.data.frame() %>%
+  ggplot(aes(x = E_TOTPOP,
+             y = cases)) +
+  geom_bar(aes(color = factor(km1$cluster)),
+           stat = 'identity') +
+  xlab('Estimated Total Population') +
+  ylab('Number of Cases, April 26, 2020') + 
+  ggtitle('Cases as a Function of Total Population')
+```
+
+Finally, we try PCA. We select the predictors that hierarchical clustering, kmeans clustering, and our initial linear models tell us are significant: percent severe housing problems, overcrowding (which indicates overcrowded living spaces), percent age 65 and older, percent rural, and estimated total population.
+
+
+```{r}
+ny_pca_numbers <- ny_overall_testing[,c(5,97,99,158,167,170)]
+
+row.names(ny_pca_numbers) <- ny_overall_testing$county.x
+
+#ok let's try to reduce our variables using PCA
+pca1 <- prcomp(ny_pca_numbers,
+               scale. = TRUE)
+
+library(pls)
+
+biplot(pca1, xlim=c(0, 0.5), ylim=c(-0.2, 0.4))
+biplot(pca1)
+```
+
+Our resulting biplots are crowded and difficult to read, but we do see the trends present in our kmeans and hierarchical clustering. Rockland, Westchester, Nassau, and Suffolk counties are all similarly displaced along the estimated total population axis, which seems to have a strong correlation with the cases axis. Severe housing problems also seems correlated with the number of cases - Rockland and Westchester appear to have the highest percentages of severe housing problems. Overcrowding is also slightly correlated with the number of casese, and Rockland seems to be the county with the greatest degree of overcrowding.
+
+It's also important to note that the percent of people age 65 and older and the percent rural axes appear anti-correlated with the number of cases. If we were looking at deaths instead of cases, we might see a correlation between the percent of people age 65 and older and the number of deaths, because covid, like other flus, appears to have more adverse affects on those with weakened immune systems and other preconditions. As we might expect, rural areas of New York seem to have lower rates of infection as people are not in as close of contact.
+
+With what we've learned from these unsupervised learning methods, we attempt to create better linear models.
+
+```{r}
+lm.model.3 <- lm(cases ~ E_TOTPOP + percent_rural + overcrowding + percent_severe_housing_problems + EP_AGE65,
+              data = ny_overall_testing)
+
+summary(lm.model.3)
+
+```
+
+Wow, our R-squared value for this model is significantly higher than our previous models. It's possible that this is due in part to the smaller size of data set. Total population, percent rural, and overcrowding are all statistically signicant predictors, but percent severe housing problems and percent of people over age 65 are not. We'll take out those predictors, and try a new model. This time we'll include information about how many tests were administered.
+
+```{r}
+lm.model.4 <- lm(cases ~ E_TOTPOP + percent_rural + overcrowding + cumulative_number_of_tests_performed,
+              data = ny_overall_testing)
+
+summary(lm.model.4)
+```
+
+Now this result is interesting when compared to our previous model. First of all, our R-squared value is 0.9839. The cumulative number of tests performed is very statistically significant, and explains almost all of the variability in our cases by county data. Moreover, estimated population is no longer a significant predictor when controlled for by the number of tests administered. Perhaps estimated total population and cumulative number of tests performed are highly correlated variables, so including both in the model is not useful due to the fact that the number of tests administered is a better predictor.
+
+The fact that the number of tests administered is a good predictor is not surprising - theoretically, those that are getting tested have a very high likelihood of having covid, otherwise they would not need to get tested. It has been stated that the US has not had enough testing units available, and one does wonder if areas with lower rates of testing would have higher rates of reported cases if they simply had more tests to administer. It would be difficult to learn about this from our data set in its current state.
+
+We try expanding the size of our dataset to see if there is any difference in our models.
+
+```{r}
+ny_overall_testing_daterange <- ny_overall_testing %>%
+  filter(county.x != 'New York City') %>%
+  mutate(case_pop_proportion = cases / E_TOTPOP) %>%
+  mutate(death_pop_proportion = deaths / E_TOTPOP) %>%
+  mutate(pop_density = E_TOTPOP / AREA_SQMI) %>%
+  filter(date == '2020-04-26' |
+        date == '2020-04-25' |
+        date == '2020-04-24' |
+        date == '2020-04-23' |
+        date == '2020-04-22' |
+        date == '2020-04-21' |
+        date == '2020-04-20')
+
+lm.model.5 <- lm(cases ~ E_TOTPOP + percent_rural + overcrowding + date,
+                 data = ny_overall_testing_daterange)
+
+summary(lm.model.5)
+```
+
+We see that total population, percent rural, and overcrowding are all very significant predictors, and our R-squared value of .832 is quite high.
+
+
+We'd now like to see how well we can model the infection rate curves for different counties across New York.
+
+
+```{r}
+
+mostcase_counties <- ny_overall_testing %>%
+  mutate(first_case = ifelse(cases>0, 1, 0)) %>%
+  filter(first_case == 1) %>%
+  arrange(-cases) %>%
+  head(10) %>%
+  select(county.x)
+
+mostcase_counties
+
+#create plot showing case rate curves by county
+ny_overall_testing %>%
+  mutate(first_case = ifelse(cases>0, 1, 0)) %>%
+  filter(first_case == 1) %>%
+  filter(county.x %in% mostcase_counties$county.x) %>%
+  ggplot(aes(x = date,
+             y = cases)) +
+  geom_point(aes(color = factor(county.x))) +
+  ggtitle('Infection Rates in NY Counties') +
+  ylab('Number of Cases') +
+  xlab('Date')
+
+
+```
+
+We see that the top 5 case-rate counties have significantly more cases than the others - we'll focus on these to make our graphical analysis more clear. First we'll try kernel smoothing to approximate these curves.
+
+```{r}
+mostcase_counties2 <- ny_overall_testing %>%
+  filter(county.x != 'New York City') %>%
+  mutate(first_case = ifelse(cases>0, 1, 0)) %>%
+  filter(first_case == 1) %>%
+  filter(date == '2020-04-27') %>%
+  arrange(-cases) %>%
+  head(5) %>%
+  select(county.x)
+
+ny_top5 <- ny_overall_testing %>%
+  filter(county.x != 'New York City') %>%
+  mutate(first_case = ifelse(cases>0, 1, 0)) %>%
+  filter(first_case == 1) %>%
+  filter(county.x %in% mostcase_counties2$county.x)
+
+#first row with data from all counties
+ny_top5 <- ny_top5[-c(1:25),]
+
+date_nums = NULL
+for (i in 1:47) {
+  start_index = 5*(i-1)
+  for(j in 1:5){
+    date_nums[start_index+j] = i
+  }
+}
+
+#add date number columns, represents number of days after March 12
+ny_top5_datenums <- cbind(ny_top5, date_nums)
+
+top_counties <- list()
+for(i in 1:5){
+  top_counties[[i]] <- ny_top5_datenums %>%
+    filter(county.x == mostcase_counties2$county.x[i])
+}
+
+
+ksmooths <- list()
+#create a kernel smoothing model for each curve
+for(i in 1:5) {
+
+# use kernel smoothing to approximate total cases curve in the US
+currentksmooth <- ksmooth(x = top_counties[[i]]$date_nums,
+              y = top_counties[[i]]$cases,
+              kernel = 'normal',
+              bandwidth = 5,
+              x.points = top_counties[[i]]$date_num)
+
+ksmooths[[i]] <- currentksmooth
+}
+
+
+top5_caseplot <- ny_top5_datenums %>%
+  mutate(first_case = ifelse(cases>0, 1, 0)) %>%
+  filter(first_case == 1) %>%
+  filter(county.x %in% mostcase_counties2$county.x) %>%
+  ggplot(aes(x = date_nums,
+             y = cases)) +
+  geom_point(aes(color = factor(county.x))) +
+  ggtitle('Infection Rates in NY Counties') +
+  ylab('Number of Cases') +
+  xlab('Days After March 12, 2020')
+
+top5_caseplot +
+  geom_line(data = data.frame(x = ksmooths[[1]]$x,
+                              y = ksmooths[[1]]$y),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = ksmooths[[2]]$x,
+                              y = ksmooths[[2]]$y),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = ksmooths[[3]]$x,
+                              y = ksmooths[[3]]$y),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = ksmooths[[4]]$x,
+                              y = ksmooths[[4]]$y),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = ksmooths[[5]]$x,
+                              y = ksmooths[[5]]$y),
+            mapping = aes(x = x,
+                          y = y)) +
+  ggtitle('US Total Cases Plot Overlaid with Smoothing Kernels')
+```
+
+We see that kernel smoothing does a very good job of approximating the infection rate curves for these counties. We can quantify the error by calculating the root mean squared error for the kernel smoothing predictions compared to the actual case numbers.
+
+```{r}
+smooth_rmses <- list()
+for(i in 1:5) {
+#calculating rmse
+smooth_rmses[[i]] <- sqrt(mean(sum((ksmooths[[i]]$y - top_counties[[i]]$cases)^2)))
+}
+
+print(smooth_rmses)
+```
+
+Are these values for a root mean squared error good or bad? We can see how the values would change if we used a different bandwidth when calculating our smoothing function. Because all the counties use the same date numbers, we can use one to understand the effect of changing bandwidth.
+
+```{r}
+#Can we reduce rmse by changing bandwidth?
+
+tot_rmse <- NULL
+for(i in 1:20) {
+  k <- ksmooth(x = top_counties[[1]]$date_nums,
+               y = top_counties[[1]]$cases,
+               kernel = 'normal',
+               bandwidth = i,
+               x.points = top_counties[[1]]$date_num)
+  
+  tot_rmse[i] <- sqrt(mean(sum((k$y - top_counties[[1]]$cases)^2)))
+}
+
+plot(tot_rmse)
+```
+
+
+As we choose a wider bandwidth, our total rmse increases. We want to be careful that we don't overfit our data, but trying a bandwidth of 3 could improve our kernel smoothing models. Next we try approximating the infection curves using splines.
+
+```{r}
+library(splines)
+
+splines <- list()
+spline_preds <- list()
+spline_rmses <- list()
+
+for(i in 1:5) {
+#creating spline models
+splines[[i]] <- lm(top_counties[[i]]$cases ~ bs(top_counties[[i]]$date_nums, knots = c(5, 25, 45)),
+                        data = ny_top5_datenums)
+
+
+spline_preds[[i]] <- predict(splines[[i]], data.frame(top_counties[[i]]$date_nums))
+
+spline_rmses[[i]] <- sqrt(mean(sum((spline_preds[[i]] - top_counties[[i]]$cases)^2)))
+
+}
+
+print(spline_rmses)
+
+top5_caseplot +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds[[1]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds[[2]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds[[3]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds[[4]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds[[5]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  ggtitle('US Total Cases Plot Overlaid with Splines')
+
+
+```
+
+The splines are also doing a great job of approximating the infection curves. Comparing rmses, it appears that kernel smoothing slightly outperformed splines. However, we didn't try a range of knots. This time we'll try a range of knots across the whole date number range.
+
+```{r}
+knot_vals <- NULL
+for(i in 1:15) {
+  knot_vals[i] = 3*i
+}
+
+library(splines)
+
+splines2 <- list()
+spline_preds2 <- list()
+spline_rmses2 <- list()
+
+for(i in 1:5) {
+#creating spline models
+splines2[[i]] <- lm(top_counties[[i]]$cases ~ bs(top_counties[[i]]$date_nums, knots = knot_vals),
+                        data = ny_top5_datenums)
+
+
+spline_preds2[[i]] <- predict(splines2[[i]], data.frame(top_counties[[i]]$date_nums))
+
+spline_rmses2[[i]] <- sqrt(mean(sum((spline_preds2[[i]] - top_counties[[i]]$cases)^2)))
+
+}
+
+print(spline_rmses2)
+
+top5_caseplot +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds2[[1]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds2[[2]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds2[[3]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds2[[4]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  geom_line(data = data.frame(x = top_counties[[i]]$date_nums,
+                              y = spline_preds2[[5]]),
+            mapping = aes(x = x,
+                          y = y)) +
+  ggtitle('US Total Cases Plot Overlaid with Splines')
+
+```
+
+Oh wow those splines look quite good! In fact, by adding knots, our splines now outperform the kernel smoothing by the metric of root mean squared error. Finally we try a smooth spline.
+
+```{r}
+smooth_splines <- list()
+smooth_spline_rmses <- list()
+
+for(i in 1:5) {
+#creating smooth spline models
+smooth_splines[[i]] <- smooth.spline(top_counties[[i]]$date_nums,
+                                    top_counties[[i]]$cases)
+
+smooth_spline_rmses[i] <- sqrt(mean(sum((smooth_splines[[i]]$y - top_counties[[i]]$cases)^2)))
+
+}
+
+print(smooth_spline_rmses)
+
+top5_caseplot +
+  geom_line(data = data.frame(date_nums = smooth_splines[[1]]$x,
+                              cases = smooth_splines[[1]]$y)) +
+  geom_line(data = data.frame(date_nums = smooth_splines[[2]]$x,
+                              cases = smooth_splines[[2]]$y)) +
+  geom_line(data = data.frame(date_nums = smooth_splines[[3]]$x,
+                              cases = smooth_splines[[3]]$y)) +
+  geom_line(data = data.frame(date_nums = smooth_splines[[4]]$x,
+                              cases = smooth_splines[[4]]$y)) +
+  geom_line(data = data.frame(date_nums = smooth_splines[[5]]$x,
+                              cases = smooth_splines[[5]]$y)) +
+ 
+  ggtitle('US Total Cases Plot Overlaid with Smoothing Splines')
+```
+
+
+Oh wow do those smoothing splines look good! Looking at the rmses, smoothing splines outperform both basic splines and kernel smoothing - one wonders if in fact we may have overfitted the data. When working with any of the techniques above, we must remember that they are effective at interpolation of our data, but not at extrapolation. Our rmse values are very low for all three models, but the predictive power of the models comes from the date numbers that we provide - trying to predict outside this range would not produce realistic resuls.
+
+
+
+
+

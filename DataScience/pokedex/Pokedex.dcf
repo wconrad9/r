@@ -1,0 +1,12 @@
+name: Pokedex
+title: Pokedex
+username:
+account: walter-conrad-data-visualization
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1523724
+bundleId: 2616798
+url: https://walter-conrad-data-visualization.shinyapps.io/Pokedex/
+when: 1574712426.88262
+asMultiple: FALSE
+asStatic: FALSE

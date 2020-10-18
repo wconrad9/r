@@ -1,0 +1,168 @@
+---
+title: "ProblemSet1"
+author: "Walter Conrad"
+date: "9/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(openintro)
+```
+
+
+1) The least expensive set with at least one wheel was $33.01.
+
+```{r}
+marioKart %>%
+  group_by(wheels) %>%
+  filter(wheels > 0) %>%
+  arrange(totalPr)
+```
+
+
+2) UPS 3 day ground had the smallest shipping range at $0 while parcel delivery has the
+greatest range with $25.5. Using the count function, I found that the UPS 3-day delivery shipping method only had one instance, which explains why the range of shipping prices was equal to $0.
+
+```{r}
+marioKart %>%
+  group_by(shipSp) %>%
+  summarize(range = max(shipPr) - min(shipPr), mean = mean(shipPr), n = n())
+```
+
+
+3) New games sold on average for approximately $6.62 more than used games. It was also an interesting finding that the median price for used games versus the mean price varied to such a large degree. This result indicated that there might be outliers that skewed the mean total price for used games.
+
+
+```{r}
+marioKart %>%
+  group_by(cond) %>%
+  summarize(mean = mean(totalPr), median = median(totalPr), n = n())
+```
+
+
+4) Using a histogram I found that there were two total prices that could be considered outliers. They were separated significantly from the majority of the rest of the points.
+
+```{r}
+marioKart %>%
+  ggplot(mapping = aes(totalPr)) +
+  geom_histogram(bins = 50)
+```
+
+
+5) I filtered out these points in the used games data by only including points with a total price less than $100 and stored the result in a new variable called marioKart.fixed. My resulting mean and median varied to a much smaller degree, by only about $0.47 as opposed to $4.39 when the points are included. Aside from the fact that these points were so far from the normal distribution of the data and could be considered outliers, I also inspected their titles and found that they probably sold for such a high total price because they bundled other items with the mariokart game. Therefore, they don't belong with the rest of the data that only represents mariokart games being sold.
+
+```{r}
+marioKart.fixed <- marioKart %>%
+  filter(totalPr<100)
+```
+
+
+```{r}
+marioKart.fixed %>%
+  group_by(cond) %>%
+  filter(totalPr < 100) %>%
+  arrange(totalPr) %>%
+  summarize(mean = mean(totalPr), median = median(totalPr))
+```
+
+```{r}
+marioKart %>%
+  group_by(cond) %>%
+  filter(cond == "used") %>%
+  filter(totalPr > 100) %>%
+  select(title)
+```
+
+
+6) I read this question to mean that I should try to find how the number of steering wheels affected the median total price. In other words, for both new and used games, how did having more steering wheels versus none affect the total price. I found that having more steering wheels, as one would expect, boosts the total price of the game for each additional steering wheel that one includes in the sale. In new games, especially having 2 or greater wheels to sell results in a higher total price.
+
+```{r}
+marioKart.fixed %>%
+  group_by(cond, wheels) %>%
+  summarize(median = median(totalPr), mean = mean(totalPr), n = n())
+```
+
+
+7) I set up an indicator column and used this to find the proportion. Used games have a much better chance than new games of selling for under $50.
+
+```{r}
+marioKart.fixed %>%
+  mutate(indicator = ifelse(totalPr<50, 1, 0)) %>%
+  group_by(cond) %>%
+  summarize(proportion = mean(indicator))
+```
+
+8) If I wanted to optimize my total price, I would want to sell a new game including a stock photo along with at least 2 and perhaps more wheels if I had them in a sale that lasted a duration of 1 day. I'd want to sell a new game because approximately 64.5% of new games sold for over $50 while only 15.5% of used games sold for over $50. Overall, on average new games sold for more than used games:
+
+```{r}
+marioKart.fixed %>%
+  group_by(cond) %>%
+  arrange(totalPr) %>%
+  summarize(mean = mean(totalPr), median = median(totalPr))
+```
+
+Additionally, having 2 wheels to sell versus having 0 or 1 boosted the median price by an average of $8.62 dollars judging by the median total prices for games sold with wheels. Ideally, the data implies that I would want to sell as many wheels as I had to boost my price, though data for such situations is quite limited. For instance, selling a new game with a third wheel boosted the total price as well, but this increase is difficult to verify because it only happened in one instance and is not therefore representative. If you have more wheels that you were willing to part with, I'd recommend selling all of them to get the most money from your set:
+
+```{r}
+marioKart.fixed %>%
+  group_by(cond, wheels) %>%
+  summarize(median = median(totalPr), mean = mean(totalPr), n = n())
+```
+
+Another interesting finding is that the inclusion of a stock photo has a significant influence on the total price, depending on the condition of the game. For new games, including a stock photo raised the mean total price by close to $10, while including a stock photo for used games actually decreased the total price. As I'm selling a new game, I'd want to include a stock photo:
+
+```{r}
+marioKart.fixed %>%
+  group_by(stockPhoto, cond) %>%
+  summarize(price = mean(totalPr), n = n())
+```
+
+Therefore, I'd definitely want to include a stock photo of my set. Finally, sales that lasted for a duration of 1 day seemed to generate a higher total price on average than 3 day or 5 day auctions. In a 1 day auction, it's possible that buyers feel a greater urgency when deciding whether or not to bid, and they don't forget about the sale as days go on:
+
+```{r}
+marioKart.fixed %>%
+  group_by(duration) %>%
+  summarize(price = mean(totalPr), n = n())
+```
+
+
+Finally, shipping method did have a correlation with total price. I thought I would mention this fact even though the seller might not have total control over this variable. Parcel delivery appears at first to result in the highest total price, but removing the two outliers that were sent by parcel reveals that UPS ground results in the highest average total price.
+
+```{r}
+marioKart.fixed %>%
+  group_by(shipSp) %>%
+  summarize(total.price = mean(totalPr), n = n())
+```
+
+We can see below that UPS Ground shipping appears to have the greatest density of instances with the highest total price.
+
+```{r}
+marioKart %>%
+  ggplot(mapping = aes(x = shipSp,
+                       y = totalPr)) +
+  geom_point()+
+  ylim(25,75)
+```
+
+
+Starting price for the auction also contributed to the final price. Most interestingly, auctions that started at $1 sold on average for much more than auctions that started for $0.99 - perhaps this is due to some quality of the bidding process and/or human nature. In the table below I only included starting prices that had greater than 3 instances because other starting prices are less statistically corroborated. Out of all these popular starting price options, a start price of $1 is significantly better than alternatives. Interestingly, $1 start price results in an average total price that is about $10 more on average than when using a starting price of $.99.
+
+```{r}
+marioKart.fixed %>%
+  group_by(startPr) %>%
+  summarize(total.price = mean(totalPr), n = n()) %>%
+  filter(n>3) %>%
+  arrange(-total.price)
+```
+
+
+Conclusively, the optimal set of variables to maximize my total price would be as follows: I'd want to sell a new game with as many steering wheels as possible for a starting price of $1 in an auction that lasted for 1 day, and I'd certainly want to include a stock photo. If possible, I'd select UPS Ground as my shipping option. This optimal set reflects the variables that I can control as the seller and that seem to maximize my total price.
+
+
